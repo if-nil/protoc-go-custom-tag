@@ -11,6 +11,14 @@ Golang [protobuf](https://github.com/golang/protobuf) doesn't support
 This tool injects custom tags to generated protobuf files, which is commonly
 used for validating fields, omitting fields from JSON data, etc.
 
+## Difference from upstream
+
+Compared with the original `favadi/protoc-go-inject-tag`, this fork currently
+adds:
+
+- `-remove_json_omitempty` for batch-removing `omitempty` from `json` tags in
+  matched generated `.pb.go` files
+
 ## Install
 
 - [protobuf version 3](https://github.com/google/protobuf)
@@ -35,10 +43,12 @@ Usage of protoc-go-inject-tag:
         tags that should be skipped (applies 'tag:"-"') for unknown fields (deprecated since protoc-gen-go v1.4.0)
   -input string
         pattern to match input file(s)
-  -verbose
-        verbose logging
   -remove_tag_comment
         removes tag comments from the generated file(s)
+  -remove_json_omitempty
+        removes omitempty from json tags in the generated file(s)
+  -verbose
+        verbose logging
 ```
 
 Add a comment with the following syntax before fields, and these will be
@@ -79,6 +89,12 @@ Then run `protoc-go-inject-tag` against the generated files (e.g `test.pb.go`):
 $ protoc-go-inject-tag -input=./test.pb.go
 # or
 $ protoc-go-inject-tag -input="*.pb.go"
+```
+
+To remove `omitempty` from generated JSON tags at the same time:
+
+```console
+$ protoc-go-inject-tag -input=./test.pb.go -remove_json_omitempty
 ```
 
 The custom tags will be injected to `test.pb.go`:

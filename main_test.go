@@ -203,6 +203,120 @@ func TestNewTagItems(t *testing.T) {
 	}
 }
 
+func TestTagItemsWithoutJSONOmitEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		tag     string
+		want    string
+		changed bool
+	}{
+		{
+			name:    "removes plain json omitempty",
+			tag:     `json:"id,omitempty"`,
+			want:    `json:"id"`,
+			changed: true,
+		},
+		{
+			name:    "keeps other json options",
+			tag:     `json:"name,omitempty,string"`,
+			want:    `json:"name,string"`,
+			changed: true,
+		},
+		{
+			name:    "leaves non json tags untouched",
+			tag:     `validate:"omitempty"`,
+			want:    `validate:"omitempty"`,
+			changed: false,
+		},
+		{
+			name:    "keeps mixed tags and only changes json",
+			tag:     `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty" validate:"omitempty"`,
+			want:    `protobuf:"bytes,1,opt,name=id,proto3" json:"id" validate:"omitempty"`,
+			changed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := newTagItems(tt.tag)
+			got, changed := items.withoutJSONOmitEmpty()
+			if changed != tt.changed {
+				t.Fatalf("changed = %v, want %v", changed, tt.changed)
+			}
+			if got.format() != tt.want {
+				t.Fatalf("format() = %q, want %q", got.format(), tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessMatchedFilesRemoveJSONOmitEmpty(t *testing.T) {
+	contents, err := os.ReadFile(testInputFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempFile := t.TempDir() + "/test.pb.go"
+	if err = os.WriteFile(tempFile, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = processMatchedFiles(tempFile, nil, false, true); err != nil {
+		t.Fatal(err)
+	}
+
+	contents, err = os.ReadFile(tempFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedExprs := []string{
+		"Address[ \t]+string[ \t]+`protobuf:\"[^\"]+\" json:\"overrided\" valid:\"ip\" yaml:\"ip\"`",
+		"Scheme[ \t]+string[ \t]+`protobuf:\"[^\"]+\" json:\"scheme\" valid:\"http\\|https\"`",
+		"Id[ \t]+string[ \t]+`protobuf:\"[^\"]+\" json:\"id\" validate:\"omitempty\"`",
+		"TestAny[ \t]+\\*any\\.Any[ \t]+`protobuf:\"[^\"]+\" json:\"test_any\"`",
+	}
+
+	for i, expr := range expectedExprs {
+		matched, err := regexp.Match(expr, contents)
+		if err != nil {
+			t.Fatalf("regexp %d: %v", i, err)
+		}
+		if !matched {
+			t.Fatalf("expected rewritten tag #%d to match %q", i+1, expr)
+		}
+	}
+
+	if bytes.Contains(contents, []byte(`json:"id,omitempty"`)) {
+		t.Fatal("expected json omitempty to be removed")
+	}
+	if !bytes.Contains(contents, []byte(`validate:"omitempty"`)) {
+		t.Fatal("expected validate omitempty to remain")
+	}
+}
+
+func TestProcessMatchedFilesKeepsFilesWithoutJSONOmitEmptyChanges(t *testing.T) {
+	contents, err := os.ReadFile("./verbose.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	temp := t.TempDir() + "/verbose.go"
+	if err = os.WriteFile(temp, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = processMatchedFiles(temp, nil, false, true); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.ReadFile(temp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contents, after) {
+		t.Fatal("expected file without json omitempty tags to remain unchanged")
+	}
+}
+
 func TestContinueParsingWhenSkippingFields(t *testing.T) {
 	expectedTags := []string{
 		`valid:"ip" yaml:"ip" json:"overrided"`,

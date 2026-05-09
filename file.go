@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -128,6 +129,105 @@ func parseFile(inputPath string, src interface{}, xxxSkip []string) (areas []tex
 	}
 	logf("parsed file %q, number of fields to inject custom tags: %d", inputPath, len(areas))
 	return
+}
+
+func parseJSONOmitEmptyFile(inputPath string, src interface{}) (areas []textArea, err error) {
+	logf("parsing file %q for json omitempty removal", inputPath)
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, inputPath, src, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, decl := range f.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			structDecl, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+
+			for _, field := range structDecl.Fields.List {
+				if field.Tag == nil {
+					continue
+				}
+
+				currentTag := field.Tag.Value[1 : len(field.Tag.Value)-1]
+				cleaned, changed := newTagItems(currentTag).withoutJSONOmitEmpty()
+				if !changed {
+					continue
+				}
+
+				areas = append(areas, textArea{
+					Start:      int(field.Pos()),
+					End:        int(field.End()),
+					CurrentTag: currentTag,
+					InjectTag:  cleaned.format(),
+				})
+			}
+		}
+	}
+
+	logf("parsed file %q, number of fields to remove json omitempty: %d", inputPath, len(areas))
+	return areas, nil
+}
+
+func processMatchedFiles(inputFiles string, xxxSkip []string, removeTagComment, removeJSONOmitEmpty bool) error {
+	globResults, err := filepath.Glob(inputFiles)
+	if err != nil {
+		return err
+	}
+
+	var matched int
+	for _, path := range globResults {
+		finfo, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+
+		if finfo.IsDir() {
+			continue
+		}
+
+		if !strings.HasSuffix(strings.ToLower(finfo.Name()), ".go") {
+			continue
+		}
+
+		matched++
+
+		areas, err := parseFile(path, nil, xxxSkip)
+		if err != nil {
+			return err
+		}
+		if err = writeFile(path, areas, removeTagComment); err != nil {
+			return err
+		}
+
+		if removeJSONOmitEmpty {
+			areas, err = parseJSONOmitEmptyFile(path, nil)
+			if err != nil {
+				return err
+			}
+			if err = writeFile(path, areas, false); err != nil {
+				return err
+			}
+		}
+	}
+
+	if matched == 0 {
+		return fmt.Errorf("input %q matched no files, see: -help", inputFiles)
+	}
+
+	return nil
 }
 
 func writeFile(inputPath string, areas []textArea, removeTagComment bool) (err error) {

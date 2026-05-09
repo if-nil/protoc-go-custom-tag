@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -46,6 +47,39 @@ func (ti tagItems) override(nti tagItems) tagItems {
 		}
 	}
 	return append(overrided, nti...)
+}
+
+func (ti tagItems) withoutJSONOmitEmpty() (tagItems, bool) {
+	cleaned := make(tagItems, 0, len(ti))
+	changed := false
+
+	for _, item := range ti {
+		if item.key != "json" {
+			cleaned = append(cleaned, item)
+			continue
+		}
+
+		value, err := strconv.Unquote(item.value)
+		if err != nil {
+			cleaned = append(cleaned, item)
+			continue
+		}
+
+		parts := strings.Split(value, ",")
+		filtered := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part == "omitempty" {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, part)
+		}
+
+		item.value = strconv.Quote(strings.Join(filtered, ","))
+		cleaned = append(cleaned, item)
+	}
+
+	return cleaned, changed
 }
 
 func newTagItems(tag string) tagItems {
